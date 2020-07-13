@@ -44,6 +44,10 @@ class Mail
                 $host = 'smtp.163.com';
                 $secure = 'ssl';
                 $port = 465;
+            } else if (stripos($username, '@vip.163.com') !== false) {
+                $host = 'smtp.vip.163.com';
+                $secure = 'ssl';
+                $port = 465;
             } else {
                 throw new \Exception('不受支持的邮箱。目前仅支持谷歌邮箱、QQ邮箱以及163邮箱，推荐使用谷歌邮箱。');
             }
@@ -78,7 +82,7 @@ class Mail
     public static function send($subject, $content, $to = '', $template = '')
     {
         if (config('mail.enable') === false) {
-            system_log(sprintf('由于没有启用邮件功能，故本次不通过邮件送信。今次邮件标题为：%s', $subject));
+            system_log('由于没有启用邮件功能，故本次不通过邮件送信。');
 
             return false;
         }

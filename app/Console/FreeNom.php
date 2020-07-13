@@ -19,9 +19,9 @@ use Luolongfei\Lib\TelegramBot;
 
 class FreeNom
 {
-    const VERSION = 'v0.2.2';
+    const VERSION = 'v0.2.5';
 
-    const TIMEOUT = 32.52;
+    const TIMEOUT = 34.52;
 
     // FreeNom登录地址
     const LOGIN_URL = 'https://my.freenom.com/dologin.php';
@@ -37,6 +37,9 @@ class FreeNom
 
     // 匹配域名信息的正则
     const DOMAIN_INFO_REGEX = '/<tr><td>(?P<domain>[^<]+)<\/td><td>[^<]+<\/td><td>[^<]+<span class="[^"]+">(?P<days>\d+)[^&]+&domain=(?P<id>\d+)"/i';
+
+    // 匹配登录状态的正则
+    const LOGIN_STATUS_REGEX = '/<li.*?Logout.*?<\/li>/i';
 
     /**
      * @var FreeNom
@@ -74,8 +77,11 @@ class FreeNom
             'timeout' => self::TIMEOUT,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_AUTOREFERER => true,
+            'verify' => config('verifySSL'),
             'debug' => config('debug')
         ]);
+
+        system_log(sprintf('当前程序版本 %s', self::VERSION));
     }
 
     /**
@@ -122,7 +128,7 @@ class FreeNom
         $this->login();
         $authCookie = $this->jar->getCookieByName('WHMCSZH5eHTGhfvzP')->getValue();
         if (empty($authCookie)) {
-            throw new LlfException(32520002);
+            throw new LlfException(34520002);
         }
 
         // 检查域名状态
@@ -134,14 +140,18 @@ class FreeNom
         ]);
         $body = (string)$response->getBody();
 
+        if (!preg_match(self::LOGIN_STATUS_REGEX, $body)) {
+            throw new LlfException(34520009);
+        }
+
         // 域名数据
         if (!preg_match_all(self::DOMAIN_INFO_REGEX, $body, $domains, PREG_SET_ORDER)) {
-            throw new LlfException(32520003);
+            throw new LlfException(34520003);
         }
 
         // 页面token
         if (!preg_match(self::TOKEN_REGEX, $body, $matches)) {
-            throw new LlfException(32520004);
+            throw new LlfException(34520004);
         }
         $token = $matches['token'];
 
@@ -194,7 +204,7 @@ class FreeNom
             $domainInfo .= sprintf('<a href="http://%s" rel="noopener" target="_blank">%s</a>还有<span style="font-weight: bold; font-size: 16px;">%d</span>天到期，', $domain, $domain, $days);
             $domainInfoTG .= sprintf('[%s](http://%s)还有*%d*天到期，', $domain, $domain, $days);
         }
-        $domainInfoTG .= "更多信息可以参考[Freenom官网](https://my.freenom.com/domains.php?a=renewals)哦~\n\n（如果你不想每次执行都收到推送，请将config.php中noticeFreq的值设为0，使程序只在有续期操作时才推送）";
+        $domainInfoTG .= "更多信息可以参考[Freenom官网](https://my.freenom.com/domains.php?a=renewals)哦~\n\n（如果你不想每次执行都收到推送，请将 .env 中 NOTICE_FREQ 的值设为0，使程序只在有续期操作时才推送）";
 
         if ($notRenewed || $renewed) {
             Mail::send(
@@ -214,7 +224,7 @@ class FreeNom
             ));
             system_log(sprintf("%s：续期结果如下：\n%s", $this->username, $result));
         } else {
-            if (config('noticeFreq') === 1) {
+            if (config('noticeFreq') == 1) {
                 Mail::send(
                     '报告，今天没有域名需要续期',
                     [
@@ -225,8 +235,10 @@ class FreeNom
                     'notice'
                 );
                 TelegramBot::send("报告，今天没有域名需要续期，所有域名情况如下：\n\n" . $domainInfoTG);
+            } else {
+                system_log('当前通知频率为「仅当有续期操作时」，故本次不会推送通知');
             }
-            system_log(sprintf('%s：<green>执行成功，今次没有需要续期的域名。</green>', $this->username));
+            system_log(sprintf('%s：<green>执行成功，今次没有需要续期的域名</green>', $this->username));
         }
     }
 
@@ -295,13 +307,41 @@ class FreeNom
         }
 
         if (empty($accounts)) {
-            throw new LlfException(32520001);
+            throw new LlfException(34520001);
         }
 
         // 去重
         $this->arrayUnique($accounts);
 
         return $accounts;
+    }
+
+    /**
+     * 发送异常报告
+     *
+     * @param \Exception $e
+     *
+     * @throws \Exception
+     */
+    private function sendExceptionReport($e)
+    {
+        Mail::send(
+            '主人，' . $e->getMessage(),
+            [
+                $this->username,
+                sprintf('具体是在%s文件的第%d行，抛出了一个异常。异常的内容是%s，快去看看吧。', $e->getFile(), $e->getLine(), $e->getMessage()),
+            ],
+            '',
+            'LlfException'
+        );
+
+        TelegramBot::send(sprintf(
+            '主人，出错了。具体是在%s文件的第%d行，抛出了一个异常。异常的内容是%s，快去看看吧。（账户：%s）',
+            $e->getFile(),
+            $e->getLine(),
+            $e->getMessage(),
+            $this->username
+        ), '', false);
     }
 
     /**
@@ -315,26 +355,14 @@ class FreeNom
             try {
                 $this->username = $account['username'];
                 $this->password = $account['password'];
+
                 $this->renewDomains();
             } catch (LlfException $e) {
-                Mail::send(
-                    '主人，' . $e->getMessage(),
-                    [
-                        $this->username,
-                        sprintf('具体是在%s文件的第%d行，抛出了一个异常。异常的内容是%s，快去看看吧。', $e->getFile(), $e->getLine(), $e->getMessage()),
-                    ],
-                    '',
-                    'LlfException'
-                );
-                TelegramBot::send(sprintf(
-                    '主人，出错了。具体是在%s文件的第%d行，抛出了一个异常。异常的内容是%s，快去看看吧。（账户：%s）',
-                    $e->getFile(),
-                    $e->getLine(),
-                    $e->getMessage(),
-                    $this->username
-                ));
+                system_log(sprintf('出错：<red>%s</red>', $e->getMessage()));
+                $this->sendExceptionReport($e);
             } catch (\Exception $e) {
                 system_log(sprintf('出错：<red>%s</red>', $e->getMessage()), $e->getTrace());
+                $this->sendExceptionReport($e);
             }
         }
     }
