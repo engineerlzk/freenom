@@ -19,7 +19,7 @@ Documentation: [English version](https://github.com/luolongfei/freenom/blob/mast
 
 [🚧  配置脚本](#--配置脚本)
 
-[🎈  添加计划任务](#--添加计划任务)
+[🎈  添加计划任务](#--添加计划任务--fork的项目需要修改本文件才能触发定时任务)
 
 [☕  验证](#--验证)
 
